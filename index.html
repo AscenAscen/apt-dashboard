@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>아파트 실거래가 대시보드</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--ink:#1d2320;--mute:#6b7570;--line:#e4e2da;--acc:#0f7b5f;--acc2:#c9772b;--up:#d6453d;--down:#2f6fd0;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root{--bg:#141816;--card:#1d2321;--ink:#eceee9;--mute:#98a29c;--line:#2d3532;--acc:#3fc79e;--acc2:#e8a064;--up:#ff7b72;--down:#6aa5ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 "Pretendard","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+.wrap{max-width:920px;margin:0 auto;padding:18px 14px 48px}
+h1{font-size:21px;margin:4px 0 2px}.sub{color:var(--mute);margin:0 0 14px;font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h2{font-size:15px;margin:0 0 10px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+select,button{font:inherit;padding:8px 10px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink);max-width:100%}
+select{flex:1 1 150px;min-width:0}
+button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:9px}
+.k{background:var(--bg);border-radius:10px;padding:9px 11px}.k b{display:block;font-size:17px}.k span{font-size:12px;color:var(--mute)}
+.up{color:var(--up)}.down{color:var(--down)}
+.sc{overflow-x:auto}svg{width:100%;height:auto;display:block}
+table{border-collapse:collapse;width:100%;min-width:420px;font-size:14px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}
+th{color:var(--mute);font-weight:500}
+.note{font-size:12.5px;color:var(--mute)}
+.lg{display:flex;gap:14px;font-size:12.5px;color:var(--mute);margin-bottom:4px}
+.lg i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+#bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}#bar div{height:100%;background:var(--acc)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>아파트 실거래가 대시보드</h1>
+<p class="sub" id="upd">불러오는 중…</p>
+<div class="card" id="prog" style="display:none"><span class="note" id="progt"></span><div id="bar"><div></div></div></div>
+<div class="card">
+<div class="row"><select id="sd"></select><select id="sg"></select><select id="dg"></select></div>
+<div class="row" style="margin-top:8px"><select id="ap"></select><select id="ar"></select><select id="pd"><option value="0">전체 기간</option><option value="36">최근 3년</option><option value="12">최근 1년</option></select></div>
+<div class="note" id="msg" style="margin-top:8px"></div>
+</div>
+<div id="dash" style="display:none">
+<div class="card"><div class="kpis" id="kpi"></div></div>
+<div class="card"><h2>월별 평균 가격 (만원)</h2><div class="lg"><span><i style="background:var(--acc)"></i>매매</span><span><i style="background:var(--acc2)"></i>전세</span></div><div class="sc" id="c1"></div></div>
+<div class="card"><h2>월별 매매 거래량</h2><div class="sc" id="c2"></div></div>
+<div class="card"><div class="row" style="margin-bottom:8px"><button id="t1" class="on">매매</button><button id="t2">전월세</button></div>
+<div class="sc"><table id="tb"></table></div>
+<p class="note">같은 평형이라도 층·동에 따라 가격이 다릅니다. 평균은 참고용이니 개별 거래를 함께 보세요. 전세가율은 월세가 없는 순수 전세 거래만으로 계산합니다.</p></div>
+</div>
+</div>
+<script>
+var IDX,REG,TR=[],RT=[],tab='trade',cur=[],curR=[];
+function $(i){return document.getElementById(i)}
+function won(p){if(p==null||isNaN(p))return '-';p=Math.round(p);var e=Math.floor(p/10000),m=p%10000;return e?e+'억'+(m?' '+m.toLocaleString()+'만':''):m.toLocaleString()+'만'}
+function avg(a){return a.length?a.reduce(function(s,v){return s+v},0)/a.length:null}
+function ymf(y){return y.slice(0,4)+'.'+y.slice(4)}
+function opt(v,t){return '<option value="'+String(v).replace(/"/g,'&quot;')+'">'+t+'</option>'}
+function cnt(rows,f){var m={};rows.forEach(function(r){var k=f(r);m[k]=(m[k]||0)+1});return m}
+fetch('data/index.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(j){IDX=j;init()}).catch(function(){$('upd').textContent='아직 데이터가 없어요. GitHub의 Actions 탭에서 update-data 를 한 번 실행해 주세요.'});
+function init(){
+$('upd').textContent='마지막 갱신 '+IDX.updated.replace('T',' ').slice(0,16)+' (한국시간) · 국토교통부 실거래가 기준';
+var done=IDX.total-IDX.pending;
+if(IDX.pending>0){$('prog').style.display='block';$('progt').textContent='과거 데이터를 채우는 중입니다 ('+Math.round(done/IDX.total*100)+'%). 매일 자동으로 이어서 받아요.';$('bar').firstChild.style.width=(done/IDX.total*100)+'%'}
+var sd={};IDX.regions.forEach(function(r){sd[r.n.split(' ')[0]]=1});
+$('sd').innerHTML=opt('','시도 선택')+Object.keys(sd).map(function(s){return opt(s,s)}).join('');
+$('sg').innerHTML=opt('','시군구');$('dg').innerHTML=opt('','동');$('ap').innerHTML=opt('','단지');$('ar').innerHTML=opt('','평형')}
+$('sd').onchange=function(){var s=$('sd').value;
+$('sg').innerHTML=opt('','시군구 선택')+IDX.regions.map(function(r,i){return r.n.split(' ')[0]==s?opt(i,r.n.slice(s.length+1)):''}).join('');
+clear(0)};
+$('sg').onchange=function(){var v=$('sg').value;clear(1);if(v==='')return;REG=IDX.regions[+v];load(REG)};
+$('dg').onchange=fillApt;$('ap').onchange=fillArea;$('ar').onchange=draw;$('pd').onchange=draw;
+$('t1').onclick=function(){tab='trade';tabs()};$('t2').onclick=function(){tab='rent';tabs()};
+function tabs(){$('t1').className=tab=='trade'?'on':'';$('t2').className=tab=='rent'?'on':'';table()}
+function clear(l){if(l<1)$('sg').value='';TR=[];RT=[];$('dg').innerHTML=opt('','동');$('ap').innerHTML=opt('','단지');$('ar').innerHTML=opt('','평형');$('dash').style.display='none';$('msg').textContent=''}
+function load(r){
+$('msg').textContent='불러오는 중…';
+function get(k,ym){return fetch('data/'+k+'/'+r.c+'/'+ym+'.json').then(function(x){return x.json()}).then(function(j){return j.r.map(function(a){return [ym].concat(a)})}).catch(function(){return []})}
+Promise.all([Promise.all(r.t.map(function(m){return get('trade',m)})),Promise.all(r.r.map(function(m){return get('rent',m)}))]).then(function(res){
+var fl=function(a){return a.reduce(function(s,x){return s.concat(x)},[])};
+TR=fl(res[0]).map(function(a){return {ym:a[0],d:a[1]||0,apt:a[2],dg:a[3],ar:Math.round(a[4]||0),p:a[5],f:a[6],by:a[7]}}).filter(function(x){return x.p});
+RT=fl(res[1]).map(function(a){return {ym:a[0],d:a[1]||0,apt:a[2],dg:a[3],ar:Math.round(a[4]||0),dep:a[5],mon:a[6]||0,f:a[7]}}).filter(function(x){return x.dep});
+if(!TR.length&&!RT.length){$('msg').textContent='이 지역은 아직 받은 데이터가 없어요. 수집이 진행되면 나타납니다.';return}
+$('msg').textContent='매매 '+TR.length.toLocaleString()+'건 · 전월세 '+RT.length.toLocaleString()+'건';
+var m=cnt(TR.concat(RT),function(r){return r.dg}),ks=Object.keys(m).sort(function(a,b){return m[b]-m[a]});
+$('dg').innerHTML=opt('','전체 동')+ks.map(function(k){return opt(k,k+' · '+m[k]+'건')}).join('');fillApt()})}
+function fillApt(){var dg=$('dg').value,m={};
+TR.concat(RT).forEach(function(r){if(!dg||r.dg==dg){var k=r.apt+'|'+r.dg;m[k]=(m[k]||0)+1}});
+var ks=Object.keys(m).sort(function(a,b){return m[b]-m[a]});
+$('ap').innerHTML=ks.map(function(k){var p=k.split('|');return opt(k,p[0]+(dg?'':' ('+p[1]+')')+' · '+m[k]+'건')}).join('')||opt('','단지 없음');fillArea()}
+function fillArea(){var k=$('ap').value;if(!k){$('dash').style.display='none';return}
+var p=k.split('|'),m={};TR.concat(RT).forEach(function(r){if(r.apt==p[0]&&r.dg==p[1])m[r.ar]=(m[r.ar]||0)+1});
+var as=Object.keys(m).map(Number).sort(function(a,b){return a-b});
+$('ar').innerHTML=opt(0,'전체 평형')+as.map(function(a){return opt(a,'전용 '+a+'㎡ (약 '+Math.round(a*1.3*0.3025)+'평형) · '+m[a]+'건')}).join('');draw()}
+function draw(){
+var p=($('ap').value||'').split('|'),a=+$('ar').value,pd=+$('pd').value;
+var f=function(r){return r.apt==p[0]&&r.dg==p[1]&&(!a||r.ar==a)};
+var d=TR.filter(f),w=RT.filter(f);
+if(pd){var mx=d.concat(w).reduce(function(m,r){return r.ym>m?r.ym:m},'0'),y=+mx.slice(0,4),mo=+mx.slice(4)-pd+1;while(mo<1){mo+=12;y--}var cut=''+(y*100+mo);d=d.filter(function(r){return r.ym>=cut});w=w.filter(function(r){return r.ym>=cut})}
+cur=d.sort(srt);curR=w.sort(srt);$('dash').style.display='block';
+if(!d.length&&!w.length){$('kpi').innerHTML='<div class="k"><b>-</b><span>조건에 맞는 거래가 없어요</span></div>';$('c1').innerHTML=$('c2').innerHTML=$('tb').innerHTML='';return}
+var jw=w.filter(function(r){return !r.mon});
+var mt=group(d,function(r){return r.p}),mj=group(jw,function(r){return r.dep});
+var ms=Object.keys(mt).concat(Object.keys(mj)).filter(function(v,i,s){return s.indexOf(v)==i}).sort();
+var tm=Object.keys(mt).sort(),jm=Object.keys(mj).sort();
+var rc=avg(tm.slice(-3).map(function(m){return avg(mt[m])}).filter(function(v){return v!=null})),jc=jm.length?avg(mj[jm[jm.length-1]]):null;
+var chg=null;if(tm.length>12){var pv=avg(tm.slice(-15,-12).map(function(m){return avg(mt[m])}));if(pv)chg=(rc/pv-1)*100}
+var last=d[0],hi=d.length?d.reduce(function(m,r){return r.p>m.p?r:m},d[0]):null,lo=d.length?Math.min.apply(null,d.filter(function(r){return r.ym>='202101'}).map(function(r){return r.p}).concat([Infinity])):null;if(lo===Infinity)lo=null;
+var rate=(jc&&rc)?jc/rc*100:null,fromHi=(hi&&rc)?(rc/hi.p-1)*100:null;
+function pc(v){return v==null?'-':'<span class="'+(v>=0?'up':'down')+'">'+(v>=0?'+':'')+v.toFixed(1)+'%</span>'}
+var K=[['최근 매매가',last?won(last.p):'-',last?ymf(last.ym)+(last.f!=null?' · '+last.f+'층':''):''],['최근 3개월 평균',won(rc),'매매'],['1년 전 대비',pc(chg),'3개월 평균끼리'],
+['전고점(최고가)',hi?won(hi.p):'-',hi?ymf(hi.ym):''],['전고점 대비',pc(fromHi),'최근 3개월 평균 기준'],['최저가 (2021년~)',won(lo),'2021.01 이후 거래'],
+['최근 전세가',won(jc),jm.length?ymf(jm[jm.length-1])+' 평균':''],['전세가율',rate==null?'-':rate.toFixed(1)+'%','전세 ÷ 매매 평균'],
+['평당가(최근)',last&&last.ar?won(last.p/(last.ar*0.3025)):'-','전용 기준'],['거래 건수',d.length.toLocaleString()+'건','전월세 '+w.length.toLocaleString()+'건']];
+$('kpi').innerHTML=K.map(function(x){return '<div class="k"><span>'+x[0]+'</span><b>'+x[1]+'</b><span>'+x[2]+'</span></div>'}).join('');
+line(ms,ms.map(function(m){return mt[m]?avg(mt[m]):null}),ms.map(function(m){return mj[m]?avg(mj[m]):null}));
+bars(ms,ms.map(function(m){return mt[m]?mt[m].length:0}));table()}
+function srt(x,y){return (y.ym+('0'+y.d).slice(-2))>(x.ym+('0'+x.d).slice(-2))?1:-1}
+function group(rows,f){var m={};rows.forEach(function(r){(m[r.ym]=m[r.ym]||[]).push(f(r))});return m}
+function table(){var rows=tab=='trade'?cur:curR,h;
+if(tab=='trade')h='<tr><th>계약</th><th>전용</th><th>층</th><th>거래가</th></tr>'+rows.slice(0,20).map(function(r){return '<tr><td>'+ymf(r.ym)+(r.d?'.'+r.d:'')+'</td><td>'+r.ar+'㎡</td><td>'+(r.f==null?'-':r.f)+'</td><td>'+won(r.p)+'</td></tr>'}).join('');
+else h='<tr><th>계약</th><th>전용</th><th>층</th><th>보증금</th><th>월세</th></tr>'+rows.slice(0,20).map(function(r){return '<tr><td>'+ymf(r.ym)+(r.d?'.'+r.d:'')+'</td><td>'+r.ar+'㎡</td><td>'+(r.f==null?'-':r.f)+'</td><td>'+won(r.dep)+'</td><td>'+(r.mon?r.mon.toLocaleString()+'만':'전세')+'</td></tr>'}).join('');
+$('tb').innerHTML=rows.length?h:'<tr><td>거래 내역이 없어요</td></tr>'}
+function line(ms,a,b){
+var W=720,H=250,L=64,R=12,T=14,B=28,all=a.concat(b).filter(function(v){return v!=null});if(!all.length){$('c1').innerHTML='';return}
+var mn=Math.min.apply(null,all),mx=Math.max.apply(null,all),pad=(mx-mn)*0.1||mx*0.05;mn-=pad;mx+=pad;
+function X(i){return L+(ms.length==1?(W-L-R)/2:i*(W-L-R)/(ms.length-1))}function Y(p){return T+(mx-p)/(mx-mn)*(H-T-B)}
+var s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="월별 평균 가격">';
+for(var g=0;g<=4;g++){var val=mn+(mx-mn)*g/4,y=Y(val);s+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y+'" y2="'+y+'" stroke="var(--line)"/><text x="'+(L-6)+'" y="'+(y+4)+'" text-anchor="end" font-size="11" fill="var(--mute)">'+won(val)+'</text>'}
+var st=Math.max(1,Math.ceil(ms.length/8));
+ms.forEach(function(m,i){if(i%st==0)s+='<text x="'+X(i)+'" y="'+(H-8)+'" text-anchor="middle" font-size="11" fill="var(--mute)">'+m.slice(2,4)+'.'+m.slice(4)+'</text>'});
+[[a,'var(--acc)'],[b,'var(--acc2)']].forEach(function(sr){var seg=[];sr[0].forEach(function(v,i){if(v==null){if(seg.length)s+=pl(seg,sr[1]);seg=[]}else seg.push([X(i),Y(v),ms[i],v])});if(seg.length)s+=pl(seg,sr[1])});
+function pl(seg,c){var o='<polyline fill="none" stroke="'+c+'" stroke-width="2.5" stroke-linejoin="round" points="'+seg.map(function(q){return q[0]+','+q[1]}).join(' ')+'"/>';
+if(ms.length<70)o+=seg.map(function(q){return '<circle cx="'+q[0]+'" cy="'+q[1]+'" r="3" fill="'+c+'"><title>'+q[2]+' '+won(q[3])+'</title></circle>'}).join('');return o}
+$('c1').innerHTML=s+'</svg>'}
+function bars(ms,v){var W=720,H=120,L=64,R=12,T=8,B=24,mx=Math.max.apply(null,v.concat([1])),bw=(W-L-R)/ms.length;
+var s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="월별 매매 거래량">';
+ms.forEach(function(m,i){var h=v[i]/mx*(H-T-B);s+='<rect x="'+(L+i*bw+bw*0.15)+'" y="'+(H-B-h)+'" width="'+bw*0.7+'" height="'+h+'" rx="2" fill="var(--acc2)"><title>'+m+' '+v[i]+'건</title></rect>'});
+var st=Math.max(1,Math.ceil(ms.length/8));
+ms.forEach(function(m,i){if(i%st==0)s+='<text x="'+(L+i*bw+bw/2)+'" y="'+(H-6)+'" text-anchor="middle" font-size="11" fill="var(--mute)">'+m.slice(2,4)+'.'+m.slice(4)+'</text>'});
+$('c2').innerHTML=s+'</svg>'}
+</script>
+</body>
+</html>
